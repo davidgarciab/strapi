@@ -23,7 +23,7 @@ import {
 } from '@strapi/design-system';
 import { ArrowLeft, ArrowsOut, WarningCircle } from '@strapi/icons';
 import { useIntl } from 'react-intl';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { styled } from 'styled-components';
 
 import { COLLECTION_TYPES, SINGLE_TYPES } from '../../../../../constants/collections';
@@ -40,7 +40,9 @@ import { DocumentStatus } from '../../DocumentStatus';
 import { FormLayout } from '../../FormLayout';
 import { ComponentProvider } from '../ComponentContext';
 
+import type { RelationOpenMode } from '../../../../../../../shared/contracts/content-types';
 import type { ContentManagerPlugin, DocumentActionProps } from '../../../../../content-manager';
+import type { AnyData } from '../../../utils/data';
 
 export function getCollectionType(url: string) {
   const regex = new RegExp(`(${COLLECTION_TYPES}|${SINGLE_TYPES})`);
@@ -80,6 +82,7 @@ interface State {
   hasUnsavedChanges: boolean;
   fieldToConnect?: string;
   fieldToConnectUID?: string;
+  getParentFormValues?: () => AnyData;
 }
 
 type Action =
@@ -90,6 +93,7 @@ type Action =
         shouldBypassConfirmation: boolean;
         fieldToConnect?: string;
         fieldToConnectUID?: string;
+        getParentFormValues?: () => AnyData;
       };
     }
   | {
@@ -106,6 +110,7 @@ type Action =
         shouldBypassConfirmation: boolean;
         fieldToConnect?: string;
         fieldToConnectUID?: string;
+        getParentFormValues?: () => AnyData;
       };
     }
   | {
@@ -129,6 +134,7 @@ function reducer(state: State, action: Action): State {
           confirmDialogIntent: action.payload.document,
           fieldToConnect: action.payload.fieldToConnect,
           fieldToConnectUID: action.payload.fieldToConnectUID,
+          getParentFormValues: action.payload.getParentFormValues,
         };
       }
 
@@ -145,6 +151,9 @@ function reducer(state: State, action: Action): State {
         isModalOpen: true,
         fieldToConnect: hasToResetDocumentHistory ? undefined : action.payload.fieldToConnect,
         fieldToConnectUID: hasToResetDocumentHistory ? undefined : action.payload.fieldToConnectUID,
+        getParentFormValues: hasToResetDocumentHistory
+          ? undefined
+          : action.payload.getParentFormValues,
       };
     case 'GO_BACK':
       if (state.hasUnsavedChanges && !action.payload.shouldBypassConfirmation) {
@@ -179,6 +188,7 @@ function reducer(state: State, action: Action): State {
         isModalOpen: true,
         fieldToConnect: undefined,
         fieldToConnectUID: undefined,
+        getParentFormValues: undefined,
       };
     case 'CANCEL_CONFIRM_DIALOG':
       return {
@@ -196,6 +206,9 @@ function reducer(state: State, action: Action): State {
         confirmDialogIntent: null,
         hasUnsavedChanges: false,
         isModalOpen: false,
+        fieldToConnect: undefined,
+        fieldToConnectUID: undefined,
+        getParentFormValues: undefined,
       };
     case 'SET_HAS_UNSAVED_CHANGES':
       return {
@@ -215,6 +228,7 @@ interface RelationModalContextValue {
   currentDocument: ReturnType<UseDocument>;
   onPreview?: () => void;
   isCreating: boolean;
+  relationOpenMode: RelationOpenMode;
 }
 
 const [RelationModalProvider, useRelationModal] =
@@ -222,7 +236,10 @@ const [RelationModalProvider, useRelationModal] =
 
 function isRenderProp(
   children: RelationModalRendererProps['children']
-): children is (props: { dispatch: (action: Action) => void }) => React.ReactNode {
+): children is (props: {
+  dispatch: (action: Action) => void;
+  relationOpenMode: RelationOpenMode;
+}) => React.ReactNode {
   return typeof children === 'function';
 }
 
@@ -235,7 +252,10 @@ type RelationModalRendererProps =
   // Is creating
   | {
       relation?: never;
-      children: (props: { dispatch: (action: Action) => void }) => React.ReactNode;
+      children: (props: {
+        dispatch: (action: Action) => void;
+        relationOpenMode: RelationOpenMode;
+      }) => React.ReactNode;
     };
 
 const RootRelationRenderer = (props: RelationModalRendererProps) => {
@@ -260,6 +280,11 @@ const RootRelationRenderer = (props: RelationModalRendererProps) => {
     params,
   };
 
+  // Get the relationOpenMode setting from the current document's layout configuration
+  const documentLayoutResponse = useDocumentLayout(rootDocument.model);
+  const relationOpenMode: RelationOpenMode =
+    documentLayoutResponse.edit?.settings?.relationOpenMode ?? 'modal';
+
   const currentDocumentMeta = state.documentHistory.at(-1) ?? rootDocumentMeta;
   const currentDocument = useDocument(currentDocumentMeta);
   // TODO: check if we can remove the single type check
@@ -277,10 +302,11 @@ const RootRelationRenderer = (props: RelationModalRendererProps) => {
       currentDocumentMeta={currentDocumentMeta}
       currentDocument={currentDocument}
       isCreating={isCreating}
+      relationOpenMode={relationOpenMode}
     >
       <RelationModal>
         {isRenderProp(children)
-          ? children({ dispatch })
+          ? children({ dispatch, relationOpenMode })
           : props.relation && (
               <RelationModalTrigger relation={props.relation}>{children}</RelationModalTrigger>
             )}
@@ -292,9 +318,10 @@ const RootRelationRenderer = (props: RelationModalRendererProps) => {
 const NestedRelationRenderer = (props: RelationModalRendererProps) => {
   const { children } = props;
   const dispatch = useRelationModal('NestedRelation', (state) => state.dispatch);
+  const relationOpenMode = useRelationModal('NestedRelation', (state) => state.relationOpenMode);
 
   return isRenderProp(children)
-    ? children({ dispatch })
+    ? children({ dispatch, relationOpenMode })
     : props.relation && (
         <RelationModalTrigger relation={props.relation}>{children}</RelationModalTrigger>
       ); /* This is the trigger that will be rendered in the parent relation */
@@ -509,7 +536,13 @@ const RelationModalBody = () => {
     } else if ('documentId' in state.confirmDialogIntent) {
       dispatch({
         type: 'GO_TO_RELATION',
-        payload: { document: state.confirmDialogIntent, shouldBypassConfirmation: true },
+        payload: {
+          document: state.confirmDialogIntent,
+          shouldBypassConfirmation: true,
+          fieldToConnect: state.fieldToConnect,
+          fieldToConnectUID: state.fieldToConnectUID,
+          getParentFormValues: state.getParentFormValues,
+        },
       });
     }
   };
@@ -542,15 +575,30 @@ const RelationModalTrigger = ({
   relation: DocumentMeta;
 }) => {
   const dispatch = useRelationModal('ModalTrigger', (state) => state.dispatch);
+  const relationOpenMode = useRelationModal('ModalTrigger', (state) => state.relationOpenMode);
+
+  const fullPageUrl = getFullPageUrl(relation);
+
+  if (relationOpenMode === 'newTab') {
+    return (
+      <StyledRelationLink to={fullPageUrl} target="_blank" rel="noopener noreferrer">
+        {children}
+      </StyledRelationLink>
+    );
+  }
+
+  if (relationOpenMode === 'page') {
+    return <StyledRelationLink to={fullPageUrl}>{children}</StyledRelationLink>;
+  }
 
   return (
     <StyledTextButton
-      onClick={() => {
+      onClick={() =>
         dispatch({
           type: 'GO_TO_RELATION',
           payload: { document: relation, shouldBypassConfirmation: false },
-        });
-      }}
+        })
+      }
     >
       {children}
     </StyledTextButton>
@@ -565,6 +613,23 @@ const StyledTextButton = styled(TextButton)`
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+`;
+
+const StyledRelationLink = styled(RouterLink)`
+  max-width: 100%;
+  font-size: ${({ theme }) => theme.fontSizes[2]};
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+  color: ${({ theme }) => theme.colors.primary600};
+  text-decoration: none;
+
+  &:hover,
+  &:focus {
+    color: ${({ theme }) => theme.colors.primary700};
+    text-decoration: underline;
   }
 `;
 
@@ -718,5 +783,5 @@ const RelationModalForm = () => {
   );
 };
 
-export { reducer, RelationModalRenderer, useRelationModal };
-export type { State, Action };
+export { reducer, RelationModalRenderer, useRelationModal, getFullPageUrl, generateCreateUrl };
+export type { State, Action, RelationOpenMode };

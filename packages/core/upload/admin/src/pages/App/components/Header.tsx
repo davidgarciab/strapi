@@ -1,4 +1,4 @@
-import { useQueryParams, Layouts } from '@strapi/admin/strapi-admin';
+import { deepEncodeQueryValues, useQueryParams, Layouts } from '@strapi/admin/strapi-admin';
 import { Button, Flex, Link } from '@strapi/design-system';
 import { ArrowLeft, Plus } from '@strapi/icons';
 import { stringify } from 'qs';
@@ -11,11 +11,21 @@ import { getTrad } from '../../../utils';
 import type { Folder } from '../../../../../shared/contracts/folders';
 import type { CrumbDefinition } from '../../../components/Breadcrumbs/Breadcrumbs';
 
-interface HeaderProps {
+interface FolderDefinition extends Omit<Folder, 'children' | 'files' | 'parent'> {
+  children: {
+    count: number;
+  };
+  files: {
+    count: number;
+  };
+  parent?: FolderDefinition;
+}
+
+export interface HeaderProps {
   breadcrumbs?: Array<CrumbDefinition> | null;
   canCreate: boolean;
-  folder?: Folder | null;
-  onToggleEditFolderDialog: ({ created }?: { created?: boolean }) => void;
+  folder?: FolderDefinition | null;
+  onToggleEditFolderDialog: (args?: { created?: boolean }) => void;
   onToggleUploadAssetDialog: () => void;
 }
 
@@ -30,10 +40,14 @@ export const Header = ({
   const { pathname } = useLocation();
   const [{ query }] = useQueryParams();
   const backQuery = {
-    ...query,
+    ...deepEncodeQueryValues(query),
     folder:
       folder?.parent && typeof folder.parent !== 'number' && folder.parent.id
         ? folder.parent.id
+        : undefined,
+    folderPath:
+      folder?.parent && typeof folder.parent !== 'number' && folder.parent.path
+        ? folder.parent.path
         : undefined,
   };
 
@@ -45,6 +59,7 @@ export const Header = ({
       })}
       subtitle={
         breadcrumbs &&
+        typeof breadcrumbs !== 'boolean' &&
         folder && (
           <Breadcrumbs
             label={formatMessage({
@@ -72,15 +87,20 @@ export const Header = ({
       }
       primaryAction={
         canCreate && (
-          <Flex gap={2}>
-            <Button startIcon={<Plus />} variant="secondary" onClick={onToggleEditFolderDialog}>
+          <Flex gap={2} width="100%">
+            <Button
+              startIcon={<Plus />}
+              variant="secondary"
+              onClick={onToggleEditFolderDialog}
+              fullWidth
+            >
               {formatMessage({
                 id: getTrad('header.actions.add-folder'),
                 defaultMessage: 'Add new folder',
               })}
             </Button>
 
-            <Button startIcon={<Plus />} onClick={onToggleUploadAssetDialog}>
+            <Button startIcon={<Plus />} onClick={onToggleUploadAssetDialog} fullWidth>
               {formatMessage({
                 id: getTrad('header.actions.add-assets'),
                 defaultMessage: 'Add new assets',

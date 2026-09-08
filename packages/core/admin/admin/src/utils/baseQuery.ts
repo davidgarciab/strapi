@@ -1,8 +1,14 @@
 import { SerializedError } from '@reduxjs/toolkit';
 import { BaseQueryFn } from '@reduxjs/toolkit/query';
 
-import { login as loginAction, logout as logoutAction } from '../reducer';
-import { getFetchClient, type FetchOptions, ApiError, isFetchError } from '../utils/getFetchClient';
+import { logout as logoutAction } from '../reducer';
+import {
+  getFetchClient,
+  triggerSessionExpired,
+  type FetchOptions,
+  ApiError,
+  isFetchError,
+} from '../utils/getFetchClient';
 
 interface QueryArguments {
   url: string;
@@ -20,15 +26,14 @@ interface UnknownApiError {
 
 type BaseQueryError = ApiError | UnknownApiError;
 
-let refreshPromise: Promise<string> | null = null;
-
 const isAuthPath = (url: string) => /^\/admin\/(login|logout|access-token)\b/.test(url);
 
-const simpleQuery: BaseQueryFn<string | QueryArguments, unknown, BaseQueryError> = async (
-  query,
-  api
-) => {
-  const { signal, dispatch } = api as { signal?: AbortSignal; dispatch: (a: any) => void };
+const simpleQuery: BaseQueryFn<
+  string | QueryArguments,
+  unknown,
+  BaseQueryError | SerializedError
+> = async (query, api) => {
+  const { signal, dispatch } = api;
 
   const executeQuery = async (queryToExecute: string | QueryArguments) => {
     const { get, post, del, put } = getFetchClient();
@@ -57,62 +62,35 @@ const simpleQuery: BaseQueryFn<string | QueryArguments, unknown, BaseQueryError>
     // Handle error of type FetchError
 
     if (isFetchError(err)) {
-      // Attempt auto-refresh on 401 then retry once
+      // If we receive a 401 here, getFetchClient already tried to refresh and failed.
+      // Log the user out since their session is no longer valid.
       if (err.status === 401) {
         const url = typeof query === 'string' ? query : query.url;
 
         if (!isAuthPath(url)) {
-          if (!refreshPromise) {
-            async function refreshAccessToken(): Promise<string> {
-              const { post } = getFetchClient();
-
-              const res = await post('/admin/access-token');
-              const token = res?.data?.data?.token as string | undefined;
-              if (!token) {
-                throw new Error('access_token_exchange_failed');
-              }
-
-              // Persist according to previous choice: localStorage presence implies persist
-              const persist = Boolean(localStorage.getItem('jwtToken'));
-              dispatch(loginAction({ token, persist }));
-
-              return token;
-            }
-
-            refreshPromise = refreshAccessToken().finally(() => {
-              refreshPromise = null;
-            });
-          }
-
           try {
-            await refreshPromise;
-            // Retry original request once with updated Authorization
-            const retry = await executeQuery(query);
-
-            return { data: retry.data };
-          } catch (refreshError) {
-            try {
-              const { post } = getFetchClient();
-              await post('/admin/logout');
-            } catch {
-              // no-op
-            }
-
-            dispatch(logoutAction());
-            // Fall through to return the original 401 error shape
+            const { post } = getFetchClient();
+            await post('/admin/logout');
+          } catch {
+            // no-op
           }
+
+          dispatch(logoutAction());
+          // Notify the React layer so the active tab redirects to /auth/login.
+          // Without this, only other tabs (via the storage event) would react;
+          // the tab that originated the failing request would stay put until
+          // the user clicked something or refreshed.
+          triggerSessionExpired();
         }
       }
 
-      if (
-        typeof err.response?.data === 'object' &&
-        err.response?.data !== null &&
-        'error' in err.response?.data
-      ) {
+      const responseData = err.response?.data;
+
+      if (typeof responseData === 'object' && responseData !== null && 'error' in responseData) {
         /**
          * This will most likely be ApiError
          */
-        return { data: undefined, error: err.response?.data.error as any };
+        return { data: undefined, error: responseData.error as BaseQueryError };
       } else {
         return {
           data: undefined,
@@ -126,7 +104,7 @@ const simpleQuery: BaseQueryFn<string | QueryArguments, unknown, BaseQueryError>
       }
     }
 
-    const error = err as Error;
+    const error = err instanceof Error ? err : new Error('Unknown error');
     return {
       data: undefined,
       error: {

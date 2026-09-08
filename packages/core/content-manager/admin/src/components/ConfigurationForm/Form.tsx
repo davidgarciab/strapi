@@ -79,7 +79,10 @@ const ConfigurationForm = ({
 
     return {
       layout: transformations(layout),
-      settings,
+      settings: {
+        ...settings,
+        relationOpenMode: settings.relationOpenMode ?? 'modal',
+      },
     };
   }, [layout, settings]);
 
@@ -107,7 +110,7 @@ const ConfigurationForm = ({
                   defaultMessage: 'Settings',
                 })}
               </Typography>
-              <Grid.Root>
+              <Grid.Root gap={4}>
                 <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
                   <InputRenderer
                     type="enumeration"
@@ -145,33 +148,67 @@ const ConfigurationForm = ({
                     }, [])}
                   />
                 </Grid.Item>
-                <Grid.Item
-                  paddingTop={6}
-                  paddingBottom={6}
-                  col={12}
-                  s={12}
-                  direction="column"
-                  alignItems="stretch"
-                >
-                  <Divider />
-                </Grid.Item>
-                <Grid.Item col={12} s={12} direction="column" alignItems="stretch">
-                  <Typography variant="delta" tag="h3">
-                    {formatMessage({
-                      id: getTranslation('containers.SettingPage.view'),
-                      defaultMessage: 'View',
+                <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
+                  <InputRenderer
+                    type="enumeration"
+                    label={formatMessage({
+                      id: getTranslation('containers.SettingPage.editSettings.relationOpenMode'),
+                      defaultMessage: 'Relation open behavior',
                     })}
-                  </Typography>
-                </Grid.Item>
-                <Grid.Item col={12} s={12} direction="column" alignItems="stretch">
-                  <Fields
-                    attributes={attributes}
-                    components={components}
-                    fieldSizes={fieldSizes}
-                    metadatas={metadatas}
+                    hint={formatMessage({
+                      id: getTranslation(
+                        'containers.SettingPage.editSettings.relationOpenMode.description'
+                      ),
+                      defaultMessage: 'Choose how relation entries open when clicked',
+                    })}
+                    name="settings.relationOpenMode"
+                    options={[
+                      {
+                        label: formatMessage({
+                          id: getTranslation(
+                            'containers.SettingPage.editSettings.relationOpenMode.modal'
+                          ),
+                          defaultMessage: 'Modal (default)',
+                        }),
+                        value: 'modal',
+                      },
+                      {
+                        label: formatMessage({
+                          id: getTranslation(
+                            'containers.SettingPage.editSettings.relationOpenMode.page'
+                          ),
+                          defaultMessage: 'Navigate to page',
+                        }),
+                        value: 'page',
+                      },
+                      {
+                        label: formatMessage({
+                          id: getTranslation(
+                            'containers.SettingPage.editSettings.relationOpenMode.newTab'
+                          ),
+                          defaultMessage: 'Open in new tab',
+                        }),
+                        value: 'newTab',
+                      },
+                    ]}
                   />
                 </Grid.Item>
               </Grid.Root>
+              <Divider />
+              <Flex direction="column" alignItems="stretch" gap={2}>
+                <Typography variant="delta" tag="h3">
+                  {formatMessage({
+                    id: getTranslation('containers.SettingPage.view'),
+                    defaultMessage: 'View',
+                  })}
+                </Typography>
+                <Fields
+                  attributes={attributes}
+                  components={components}
+                  fieldSizes={fieldSizes}
+                  metadatas={metadatas}
+                />
+              </Flex>
             </Flex>
           </Layouts.Content>
         </Form>
@@ -227,8 +264,8 @@ const extractMetadata = (
  */
 const addTmpSpaceToLayout = (
   layout: ReturnType<typeof extractMetadata>
-): Array<ConfigurationFormData['layout'][number]['children']> => [
-  ...layout.map((row) => {
+): Array<ConfigurationFormData['layout'][number]['children']> =>
+  layout.map((row) => {
     const totalSpaceTaken = row.reduce((acc, field) => acc + field.size, 0);
 
     if (totalSpaceTaken < 12) {
@@ -243,8 +280,7 @@ const addTmpSpaceToLayout = (
     }
 
     return row;
-  }),
-];
+  });
 
 /**
  * @internal

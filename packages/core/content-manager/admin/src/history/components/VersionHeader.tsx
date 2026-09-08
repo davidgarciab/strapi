@@ -96,7 +96,7 @@ export const VersionHeader = ({ headerId }: VersionHeaderProps) => {
           }),
         });
       }
-    } catch (error) {
+    } catch {
       toggleNotification({
         type: 'danger',
         message: formatMessage({ id: 'notification.error', defaultMessage: 'An error occurred' }),
@@ -161,6 +161,7 @@ export const VersionHeader = ({ headerId }: VersionHeaderProps) => {
               onClick={() => {
                 setIsConfirmDialogOpen(true);
               }}
+              fullWidth
             >
               {formatMessage({
                 id: 'content-manager.history.restore.confirm.button',

@@ -1,3 +1,5 @@
 module.exports = ({ env }) => ({
-  future: {},
+  future: {
+    betaMediaLibrary: env.bool('BETA_MEDIA_LIBRARY', false),
+  },
 });

@@ -4,7 +4,6 @@ import fs from 'node:fs/promises';
 import browserslist from 'browserslist';
 import { createStrapi } from '@strapi/core';
 import type { Core, Modules } from '@strapi/types';
-import type { Server } from 'node:http';
 
 import type { CLIContext } from '../cli/types';
 import { getStrapiAdminEnvVars, loadEnv } from './core/env';
@@ -16,14 +15,12 @@ import type { BaseContext } from './types';
 interface BaseOptions {
   stats?: boolean;
   minify?: boolean;
-  sourcemaps?: boolean;
+  sourcemap?: boolean;
   bundler?: 'webpack' | 'vite';
   open?: boolean;
-  hmrServer?: Server;
-  hmrClientPort?: number;
 }
 
-interface BuildContext<TOptions = unknown> extends BaseContext {
+interface BuildContext extends BaseContext {
   /**
    * The customisations defined by the user in their app.js file
    */
@@ -35,7 +32,7 @@ interface BuildContext<TOptions = unknown> extends BaseContext {
   /**
    * The build options
    */
-  options: BaseOptions & TOptions;
+  options: BaseOptions;
   /**
    * The plugins to be included in the JS bundle
    * incl. internal plugins, third party plugins & local plugins
@@ -43,9 +40,9 @@ interface BuildContext<TOptions = unknown> extends BaseContext {
   plugins: PluginMeta[];
 }
 
-interface CreateBuildContextArgs<TOptions = unknown> extends CLIContext {
+interface CreateBuildContextArgs extends CLIContext {
   strapi?: Core.Strapi;
-  options?: TOptions;
+  options?: BaseOptions;
 }
 
 const DEFAULT_BROWSERSLIST = [
@@ -55,13 +52,13 @@ const DEFAULT_BROWSERSLIST = [
   'not dead',
 ];
 
-const createBuildContext = async <TOptions extends BaseOptions>({
+const createBuildContext = async ({
   cwd,
   logger,
   tsconfig,
   strapi,
-  options = {} as TOptions,
-}: CreateBuildContextArgs<TOptions>): Promise<BuildContext<TOptions>> => {
+  options = {},
+}: CreateBuildContextArgs): Promise<BuildContext> => {
   /**
    * If you make a new strapi instance when one already exists,
    * you will overwrite the global and the app will _most likely_
@@ -102,10 +99,22 @@ const createBuildContext = async <TOptions extends BaseOptions>({
     STRAPI_ANALYTICS_URL: process.env.STRAPI_ANALYTICS_URL || 'https://analytics.strapi.io',
   });
 
+  // NOTE: Transports `admin.auth.cookie.name` / `path` / `domain` into the bundle; always
+  // assigned so ambient STRAPI_ADMIN_AUTH_COOKIE_* env vars cannot make the bundle disagree
+  // with the server. Domain falls back to `admin.auth.domain`, matching the server resolution.
+  env.STRAPI_ADMIN_AUTH_COOKIE_NAME =
+    strapiInstance.config.get<string | undefined>('admin.auth.cookie.name') || '';
+  env.STRAPI_ADMIN_AUTH_COOKIE_PATH =
+    strapiInstance.config.get<string | undefined>('admin.auth.cookie.path') || '';
+  env.STRAPI_ADMIN_AUTH_COOKIE_DOMAIN =
+    strapiInstance.config.get<string | undefined>('admin.auth.cookie.domain') ||
+    strapiInstance.config.get<string | undefined>('admin.auth.domain') ||
+    '';
+
   const envKeys = Object.keys(env);
 
   if (envKeys.length > 0) {
-    logger.info(
+    logger.debug(
       [
         'Including the following ENV variables as part of the JS bundle:',
         ...envKeys.map((key) => `    - ${key}`),
@@ -147,7 +156,7 @@ const createBuildContext = async <TOptions extends BaseOptions>({
 
   const { bundler = 'vite', ...restOptions } = options;
 
-  const buildContext = {
+  const buildContext: BuildContext = {
     appDir,
     adminPath,
     basePath: adminPublicPath,
@@ -160,13 +169,13 @@ const createBuildContext = async <TOptions extends BaseOptions>({
     env,
     features,
     logger,
-    options: restOptions as BaseOptions & TOptions,
+    options: restOptions,
     plugins: pluginsWithFront,
     runtimeDir,
     strapi: strapiInstance,
     target,
     tsconfig,
-  } satisfies BuildContext<TOptions>;
+  };
 
   return buildContext;
 };

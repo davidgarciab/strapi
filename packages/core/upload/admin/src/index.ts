@@ -5,6 +5,8 @@ import pluginPkg from '../../package.json';
 import { MediaLibraryDialog } from './components/MediaLibraryDialog/MediaLibraryDialog';
 import { MediaLibraryInput } from './components/MediaLibraryInput/MediaLibraryInput';
 import { PERMISSIONS } from './constants';
+import { UploadProgressDialog } from './future/components/UploadProgressDialog';
+import { uploadProgressReducer } from './future/store/uploadProgress';
 import { pluginId } from './pluginId';
 import { getTrad, prefixPluginTranslations } from './utils';
 
@@ -17,6 +19,13 @@ const name = pluginPkg.strapi.name;
 
 const admin: Plugin.Config.AdminInput = {
   register(app: StrapiApp) {
+    /**
+     * The beta Media Library owns `plugins/upload` outright when the flag is on:
+     * the legacy app is not registered at all, so there is exactly one Media
+     * Library entry in the menu and no route to rename at GA.
+     */
+    const isBetaMediaLibrary = window.strapi.future.isEnabled('betaMediaLibrary');
+
     app.addMenuLink({
       to: `plugins/${pluginId}`,
       icon: Images,
@@ -25,9 +34,28 @@ const admin: Plugin.Config.AdminInput = {
         defaultMessage: 'Media Library',
       },
       permissions: PERMISSIONS.main,
-      Component: () => import('./pages/App/App').then((mod) => ({ default: mod.Upload })),
+      Component: isBetaMediaLibrary
+        ? () => {
+            return import('./future/App').then((mod) => ({
+              default: mod.BetaMediaLibrary,
+            }));
+          }
+        : () => {
+            return import('./pages/App/App').then((mod) => ({ default: mod.Upload }));
+          },
       position: 4,
     });
+
+    if (isBetaMediaLibrary) {
+      app.addReducers({ uploadProgress: uploadProgressReducer });
+
+      app.addComponents([
+        {
+          name: 'future-global::upload-progress',
+          Component: UploadProgressDialog,
+        },
+      ]);
+    }
 
     app.addSettingsLink('global', {
       id: 'media-library-settings',
@@ -36,9 +64,10 @@ const admin: Plugin.Config.AdminInput = {
         id: getTrad('plugin.name'),
         defaultMessage: 'Media Library',
       },
-      async Component() {
-        const { ProtectedSettingsPage } = await import('./pages/SettingsPage/SettingsPage');
-        return { default: ProtectedSettingsPage };
+      Component() {
+        return import('./pages/SettingsPage/SettingsPage').then((mod) => ({
+          default: mod.ProtectedSettingsPage,
+        }));
       },
       permissions: PERMISSIONS.settings,
     });

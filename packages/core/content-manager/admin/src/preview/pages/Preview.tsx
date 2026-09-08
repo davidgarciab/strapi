@@ -21,7 +21,7 @@ import {
 import { ArrowLineLeft } from '@strapi/icons';
 import { useIntl } from 'react-intl';
 import { useLocation, useParams } from 'react-router-dom';
-import { styled } from 'styled-components';
+import { styled, useTheme } from 'styled-components';
 
 import { GetPreviewUrl } from '../../../../shared/contracts/preview';
 import { COLLECTION_TYPES } from '../../constants/collections';
@@ -36,9 +36,8 @@ import { createYupSchema } from '../../utils/validation';
 import { InputPopover } from '../components/InputPopover';
 import { PreviewHeader } from '../components/PreviewHeader';
 import { useGetPreviewUrlQuery } from '../services/preview';
-import { PUBLIC_EVENTS } from '../utils/constants';
+import { INTERNAL_EVENTS, PUBLIC_EVENTS } from '../utils/constants';
 import { getSendMessage } from '../utils/getSendMessage';
-import { previewScript } from '../utils/previewScript';
 
 import type { Schema, UID } from '@strapi/types';
 
@@ -90,7 +89,37 @@ interface PreviewContextValue {
   setPopoverField: (value: PopoverField | null) => void;
 }
 
+type PreviewHighlightColors = {
+  highlightHoverColor: string;
+  highlightActiveColor: string;
+};
+
 const [PreviewProvider, usePreviewContext] = createContext<PreviewContextValue>('PreviewPage');
+
+const getPreviewScript = (() => {
+  let previewScript = '';
+  return async (previewHighlightColors: PreviewHighlightColors) => {
+    if (!previewScript) {
+      const resp = await fetch(`${window.strapi.backendURL}/content-manager/preview/script`);
+
+      if (!resp.ok) {
+        throw new Error('Could not retrieve preview script from server.');
+      }
+
+      previewScript = await resp.text();
+
+      if (!previewScript) {
+        throw new Error('Could not retrieve preview script from server.');
+      }
+    }
+
+    return `(${previewScript})(${JSON.stringify({
+      colors: previewHighlightColors,
+      events: INTERNAL_EVENTS,
+      parentOrigin: window.location.origin,
+    })})`;
+  };
+})();
 
 /* -------------------------------------------------------------------------------------------------
  * PreviewPage
@@ -105,6 +134,7 @@ const AnimatedArrow = styled(ArrowLineLeft)<{ $isSideEditorOpen: boolean }>`
 const PreviewPage = () => {
   const location = useLocation();
   const { formatMessage } = useIntl();
+  const theme = useTheme();
 
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [isSideEditorOpen, setIsSideEditorOpen] = React.useState(true);
@@ -122,7 +152,7 @@ const PreviewPage = () => {
     collectionType: string;
   }>();
   const [{ query }] = useQueryParams<{
-    plugins?: Record<string, unknown>;
+    plugins?: { i18n?: { locale?: string } };
     status?: string;
   }>();
 
@@ -133,9 +163,14 @@ const PreviewPage = () => {
   );
   const device = DEVICES.find((d) => d.name === deviceName) ?? DEVICES[0];
 
+  const previewHighlightColors: PreviewHighlightColors = {
+    highlightHoverColor: theme.colors.primary500,
+    highlightActiveColor: theme.colors.primary600,
+  };
+
   // Listen for ready message from iframe before injecting script
   React.useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
       // Only listen to events from the preview iframe
       if (iframeRef.current) {
         const previewOrigin = new URL(iframeRef.current?.src).origin;
@@ -145,9 +180,21 @@ const PreviewPage = () => {
       }
 
       if (event.data?.type === PUBLIC_EVENTS.PREVIEW_READY) {
-        const script = `(${previewScript.toString()})()`;
-        const sendMessage = getSendMessage(iframeRef);
-        sendMessage(PUBLIC_EVENTS.STRAPI_SCRIPT, { script });
+        try {
+          const script = await getPreviewScript(previewHighlightColors);
+
+          const sendMessage = getSendMessage(iframeRef);
+          sendMessage(PUBLIC_EVENTS.STRAPI_SCRIPT, { script });
+        } catch {
+          toggleNotification({
+            type: 'danger',
+            message: formatMessage({
+              id: 'content-manager.preview.error.script-failed',
+              defaultMessage:
+                'Could not load the live preview script. Visual editing may not be available.',
+            }),
+          });
+        }
       }
     };
 
@@ -156,7 +203,9 @@ const PreviewPage = () => {
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [documentId, toggleNotification]);
+    // Preserve the existing dependency behavior: previewHighlightColors is derived from theme.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, toggleNotification, theme, formatMessage]);
 
   if (!collectionType) {
     throw new Error('Could not find collectionType in url params');
@@ -177,7 +226,7 @@ const PreviewPage = () => {
     },
     query: {
       documentId,
-      locale: params.locale,
+      locale: params.locale as GetPreviewUrl.Request['query']['locale'],
       status: params.status as GetPreviewUrl.Request['query']['status'],
     },
   });

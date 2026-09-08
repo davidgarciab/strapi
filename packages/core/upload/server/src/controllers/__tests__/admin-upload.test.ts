@@ -6,12 +6,12 @@ import { getService } from '../../utils';
 import { validateBulkUpdateBody, validateUploadBody } from '../validation/admin/upload';
 import * as findEntityAndCheckPermissionsModule from '../utils/find-entity-and-check-permissions';
 import { ACTIONS } from '../../constants';
-import { enforceUploadSecurity } from '../../utils/mime-validation';
+import { prepareUploadRequest } from '../../utils/mime-validation';
 
 jest.mock('../../utils/mime-validation', () => ({
-  enforceUploadSecurity: jest.fn(() => ({
+  prepareUploadRequest: jest.fn(() => ({
     validFiles: [{ originalFilename: 'test.jpg', mimetype: 'image/jpeg' }],
-    validFileNames: ['test.jpg'],
+    filteredBody: {},
     errors: [],
   })),
 }));
@@ -19,7 +19,7 @@ jest.mock('../../utils/mime-validation', () => ({
 jest.mock('../../utils');
 jest.mock('../validation/admin/upload');
 jest.mock('../utils/find-entity-and-check-permissions');
-const mockEnforceUploadSecurity = jest.mocked(enforceUploadSecurity);
+const mockPrepareUploadRequest = jest.mocked(prepareUploadRequest);
 
 const mockGetService = getService as jest.MockedFunction<typeof getService>;
 const mockValidateUploadBody = validateUploadBody as jest.MockedFunction<typeof validateUploadBody>;
@@ -43,18 +43,24 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     replace: jest.Mock;
   };
 
+  let fileService: {
+    signFileUrls: jest.Mock;
+    upload: jest.Mock;
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockEnforceUploadSecurity.mockResolvedValue({
+    mockPrepareUploadRequest.mockResolvedValue({
       validFiles: [{ originalFilename: 'test.jpg', mimetype: 'image/jpeg' }],
-      validFileNames: ['test.jpg'],
+      filteredBody: {},
       errors: [],
     });
 
     mockAiMetadataService = {
       isEnabled: jest.fn(),
       processFiles: jest.fn(),
+      updateFilesWithAIMetadata: jest.fn().mockResolvedValue(undefined),
     };
 
     uploadService = {
@@ -63,15 +69,15 @@ describe('Admin Upload Controller - AI Service Connection', () => {
       replace: jest.fn(),
     };
 
+    fileService = {
+      upload: jest.fn().mockResolvedValue([{}]),
+      signFileUrls: jest.fn((file) => Promise.resolve({ ...file, isUrlSigned: true })),
+    };
+
     mockGetService.mockImplementation((serviceName: string) => {
       if (serviceName === 'aiMetadata') return mockAiMetadataService;
       if (serviceName === 'upload') return uploadService;
-      if (serviceName === 'file') {
-        return {
-          upload: jest.fn().mockResolvedValue([{}]),
-          signFileUrls: jest.fn((file) => Promise.resolve(file)),
-        };
-      }
+      if (serviceName === 'file') return fileService;
       if (serviceName === 'metrics') {
         return {
           trackUsage: jest.fn().mockResolvedValue(undefined),
@@ -101,7 +107,13 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     } as any;
 
     mockValidateUploadBody.mockResolvedValue({
-      fileInfo: { name: 'test.jpg', alternativeText: '', caption: '', folder: null },
+      fileInfo: {
+        name: 'test.jpg',
+        alternativeText: '',
+        caption: '',
+        focalPoint: null,
+        folder: null,
+      },
     });
 
     mockValidateBulkUpdateBody.mockResolvedValue({
@@ -121,12 +133,137 @@ describe('Admin Upload Controller - AI Service Connection', () => {
         files: { files: { filepath: '/tmp/test.jpg', mimetype: 'image/jpeg' } },
       } as any,
       forbidden: jest.fn(),
+      query: { id: '7' },
     } as any;
 
     ctxBulk = {
       state: { userAbility: {}, user: { id: 42 } },
       request: { body: {} },
     } as any;
+  });
+
+  describe('replaceFile', () => {
+    it('accepts a single replacement file received as an array', async () => {
+      const replacementFile = {
+        filepath: '/tmp/replacement.pdf',
+        originalFilename: 'replacement.pdf',
+        mimetype: 'application/pdf',
+      };
+
+      mockContext.query = { id: '1' } as any;
+      mockContext.request!.body = {
+        fileInfo: ['{"name":"replacement.pdf","folder":null}'],
+      };
+      mockContext.request!.files = { files: [replacementFile] } as any;
+
+      mockPrepareUploadRequest.mockResolvedValue({
+        validFiles: [replacementFile],
+        filteredBody: {
+          fileInfo: {
+            name: 'replacement.pdf',
+            folder: null,
+          },
+        },
+        errors: [],
+      });
+      mockValidateUploadBody.mockResolvedValue({
+        fileInfo: {
+          name: 'replacement.pdf',
+          folder: null,
+          alternativeText: '',
+          caption: '',
+          focalPoint: null,
+        },
+      });
+
+      uploadService.replace.mockResolvedValue({
+        id: 1,
+        name: 'replacement.pdf',
+      });
+
+      await adminUploadController.replaceFile(mockContext as Context);
+
+      expect(mockPrepareUploadRequest).toHaveBeenCalledWith(
+        replacementFile,
+        mockContext.request!.body,
+        strapi
+      );
+      expect(uploadService.replace).toHaveBeenCalledWith(
+        '1',
+        {
+          data: {
+            fileInfo: {
+              name: 'replacement.pdf',
+              folder: null,
+              alternativeText: '',
+              caption: '',
+              focalPoint: null,
+            },
+          },
+          file: replacementFile,
+        },
+        { user: { id: 1 } }
+      );
+      expect(mockContext.body).toEqual({
+        id: 1,
+        name: 'replacement.pdf',
+        cleaned: true,
+        isUrlSigned: true,
+      });
+    });
+
+    // `POST /upload/files/:id/replace` delivers the id in route params; the
+    // legacy `POST /upload` multiplexer delegates here with it in the query.
+    it('reads the id from route params, preferring them over the query', async () => {
+      const replacementFile = {
+        filepath: '/tmp/replacement.pdf',
+        originalFilename: 'replacement.pdf',
+        mimetype: 'application/pdf',
+      };
+
+      mockContext.params = { id: '9' } as any;
+      mockContext.query = { id: '1' } as any;
+      mockContext.request!.files = { files: replacementFile } as any;
+
+      mockPrepareUploadRequest.mockResolvedValue({
+        validFiles: [replacementFile],
+        filteredBody: {},
+        errors: [],
+      });
+
+      uploadService.replace.mockResolvedValue({ id: 9, name: 'replacement.pdf' });
+
+      await adminUploadController.replaceFile(mockContext as Context);
+
+      expect(uploadService.replace).toHaveBeenCalledWith('9', expect.anything(), {
+        user: { id: 1 },
+      });
+    });
+
+    it('throws when neither params nor query carry an id', async () => {
+      mockContext.query = {} as any;
+
+      await expect(adminUploadController.replaceFile(mockContext as Context)).rejects.toThrow(
+        'File id is required'
+      );
+    });
+
+    it('rejects multiple replacement files', async () => {
+      mockContext.query = { id: '1' } as any;
+      mockContext.request!.files = {
+        files: [
+          { filepath: '/tmp/first.jpg', originalFilename: 'first.jpg', mimetype: 'image/jpeg' },
+          { filepath: '/tmp/second.jpg', originalFilename: 'second.jpg', mimetype: 'image/jpeg' },
+        ],
+      } as any;
+
+      await expect(adminUploadController.replaceFile(mockContext as Context)).rejects.toThrow(
+        'Cannot replace a file with multiple ones'
+      );
+
+      expect(mockPrepareUploadRequest).not.toHaveBeenCalled();
+      expect(uploadService.replace).not.toHaveBeenCalled();
+    });
   });
 
   describe('uploadFiles - Security Filtering', () => {
@@ -182,25 +319,13 @@ describe('Admin Upload Controller - AI Service Connection', () => {
 
       await adminUploadController.uploadFiles(mockContext as Context);
 
-      expect(mockEnforceUploadSecurity).toHaveBeenCalledWith(files, strapi);
+      expect(mockPrepareUploadRequest).toHaveBeenCalledWith(files, {}, strapi);
     });
 
     it('should throw ValidationError when no valid files remain after security check', async () => {
-      mockEnforceUploadSecurity.mockResolvedValue({
-        validFiles: [],
-        validFileNames: [],
-        errors: [
-          {
-            error: {
-              message: 'MIME type not allowed',
-              details: {},
-              code: 'MIME_TYPE_NOT_ALLOWED',
-            },
-            file: { originalFilename: 'test.exe' },
-            originalIndex: 0,
-          },
-        ],
-      });
+      mockPrepareUploadRequest.mockRejectedValue(
+        new errors.ValidationError('MIME type not allowed', {})
+      );
 
       await expect(adminUploadController.uploadFiles(mockContext as Context)).rejects.toThrow(
         errors.ValidationError
@@ -208,20 +333,12 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     });
 
     it('should filter fileInfo array when some files are rejected by security', async () => {
-      mockEnforceUploadSecurity.mockResolvedValue({
+      mockPrepareUploadRequest.mockResolvedValue({
         validFiles: [{ originalFilename: 'allowed.jpg', mimetype: 'image/jpeg' }],
-        validFileNames: ['allowed.jpg'],
-        errors: [
-          {
-            error: {
-              message: 'MIME type not allowed',
-              details: {},
-              code: 'MIME_TYPE_NOT_ALLOWED',
-            },
-            file: { originalFilename: 'blocked.pdf' },
-            originalIndex: 0,
-          },
-        ],
+        filteredBody: {
+          fileInfo: '{"name":"allowed.jpg","folder":null}',
+        },
+        errors: [],
       });
 
       mockContext.request!.body = {
@@ -229,7 +346,13 @@ describe('Admin Upload Controller - AI Service Connection', () => {
       };
 
       mockValidateUploadBody.mockResolvedValue({
-        fileInfo: { name: 'allowed.jpg', folder: null, alternativeText: '', caption: '' },
+        fileInfo: {
+          name: 'allowed.jpg',
+          folder: null,
+          alternativeText: '',
+          caption: '',
+          focalPoint: null,
+        },
       });
 
       await adminUploadController.uploadFiles(mockContext as Context);
@@ -243,9 +366,11 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     });
 
     it('should handle single file being filtered correctly', async () => {
-      mockEnforceUploadSecurity.mockResolvedValue({
+      mockPrepareUploadRequest.mockResolvedValue({
         validFiles: [{ originalFilename: 'test.jpg', mimetype: 'image/jpeg' }],
-        validFileNames: ['test.jpg'],
+        filteredBody: {
+          fileInfo: '{"name":"test.jpg","folder":null}',
+        },
         errors: [],
       });
 
@@ -254,7 +379,13 @@ describe('Admin Upload Controller - AI Service Connection', () => {
       };
 
       mockValidateUploadBody.mockResolvedValue({
-        fileInfo: { name: 'test.jpg', folder: null, alternativeText: '', caption: '' },
+        fileInfo: {
+          name: 'test.jpg',
+          folder: null,
+          alternativeText: '',
+          caption: '',
+          focalPoint: null,
+        },
       });
 
       await adminUploadController.uploadFiles(mockContext as Context);
@@ -268,26 +399,31 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     });
 
     it('should handle multiple files remaining after filtering', async () => {
-      mockEnforceUploadSecurity.mockResolvedValue({
+      mockPrepareUploadRequest.mockResolvedValue({
         validFiles: [
           { originalFilename: 'file1.jpg', mimetype: 'image/jpeg' },
           { originalFilename: 'file2.png', mimetype: 'image/png' },
         ],
-        validFileNames: ['file1.jpg', 'file2.png'],
+        filteredBody: {
+          fileInfo: [
+            { name: 'file1.jpg', folder: null, caption: '', alternativeText: '' },
+            { name: 'file2.png', folder: null, caption: '', alternativeText: '' },
+          ],
+        },
         errors: [],
       });
 
       mockContext.request!.body = {
         fileInfo: [
-          { name: 'file1.jpg', alternativeText: '', caption: '', folder: null },
-          { name: 'file2.png', alternativeText: '', caption: '', folder: null },
+          { name: 'file1.jpg', alternativeText: '', caption: '', focalPoint: null, folder: null },
+          { name: 'file2.png', alternativeText: '', caption: '', focalPoint: null, folder: null },
         ],
       };
 
       mockValidateUploadBody.mockResolvedValue({
         fileInfo: [
-          { name: 'file1.jpg', alternativeText: '', caption: '', folder: null },
-          { name: 'file2.png', alternativeText: '', caption: '', folder: null },
+          { name: 'file1.jpg', alternativeText: '', caption: '', focalPoint: null, folder: null },
+          { name: 'file2.png', alternativeText: '', caption: '', focalPoint: null, folder: null },
         ],
       });
 
@@ -310,16 +446,16 @@ describe('Admin Upload Controller - AI Service Connection', () => {
         { originalFilename: 'file2.png', mimetype: 'image/png' },
       ];
 
-      mockEnforceUploadSecurity.mockResolvedValue({
+      mockPrepareUploadRequest.mockResolvedValue({
         validFiles,
-        validFileNames: ['file1.jpg', 'file2.png'],
+        filteredBody: {},
         errors: [],
       });
 
       mockValidateUploadBody.mockResolvedValue({
         fileInfo: [
-          { name: 'file2.png', alternativeText: '', caption: '', folder: null },
-          { name: 'file1.jpg', alternativeText: '', caption: '', folder: null },
+          { name: 'file2.png', alternativeText: '', caption: '', focalPoint: null, folder: null },
+          { name: 'file1.jpg', alternativeText: '', caption: '', focalPoint: null, folder: null },
         ],
       });
 
@@ -343,12 +479,26 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     });
 
     it('should handle non-array fileInfo body correctly', async () => {
+      mockPrepareUploadRequest.mockResolvedValue({
+        validFiles: [{ originalFilename: 'single.jpg', mimetype: 'image/jpeg' }],
+        filteredBody: {
+          fileInfo: '{"name":"single.jpg","folder":null}',
+        },
+        errors: [],
+      });
+
       mockContext.request!.body = {
         fileInfo: '{"name":"single.jpg","folder":null}',
       };
 
       mockValidateUploadBody.mockResolvedValue({
-        fileInfo: { name: 'single.jpg', folder: null, alternativeText: '', caption: '' },
+        fileInfo: {
+          name: 'single.jpg',
+          folder: null,
+          alternativeText: '',
+          caption: '',
+          focalPoint: null,
+        },
       });
 
       await adminUploadController.uploadFiles(mockContext as Context);
@@ -362,21 +512,12 @@ describe('Admin Upload Controller - AI Service Connection', () => {
     });
 
     it('should throw ValidationError when no valid files after filtering', async () => {
-      mockEnforceUploadSecurity.mockResolvedValue({
-        validFiles: [],
-        validFileNames: [],
-        errors: [
-          {
-            error: {
-              message: 'File size exceeds limit',
-              details: { fileSize: 10000000, maxFileSize: 1000000 },
-              code: 'MIME_TYPE_NOT_ALLOWED',
-            },
-            file: { originalFilename: 'large-file.jpg' },
-            originalIndex: 0,
-          },
-        ],
-      });
+      mockPrepareUploadRequest.mockRejectedValue(
+        new errors.ValidationError('File size exceeds limit', {
+          fileSize: 10000000,
+          maxFileSize: 1000000,
+        })
+      );
 
       await expect(adminUploadController.uploadFiles(mockContext as Context)).rejects.toThrow(
         'File size exceeds limit'
@@ -403,8 +544,11 @@ describe('Admin Upload Controller - AI Service Connection', () => {
 
       expect(mockAiMetadataService.processFiles).toHaveBeenCalledWith([
         expect.objectContaining({
-          filepath: '/uploads/test.jpg',
-          mimetype: 'image/jpeg',
+          id: 1,
+          name: 'test.jpg',
+          url: '/uploads/test.jpg',
+          mime: 'image/jpeg',
+          provider: 'local',
         }),
       ]);
     });
@@ -435,7 +579,7 @@ describe('Admin Upload Controller - AI Service Connection', () => {
         { altText: 'AI generated alt text', caption: 'AI generated caption' },
       ]);
 
-      uploadService.upload.mockResolvedValue([
+      const uploadedFiles = [
         {
           id: 1,
           name: 'test.jpg',
@@ -443,17 +587,16 @@ describe('Admin Upload Controller - AI Service Connection', () => {
           url: '/uploads/test.jpg',
           provider: 'local',
         },
-      ]);
+      ];
+
+      uploadService.upload.mockResolvedValue(uploadedFiles);
 
       await adminUploadController.uploadFiles(mockContext as Context);
 
-      expect(uploadService.updateFileInfo).toHaveBeenCalledWith(
-        1,
-        {
-          alternativeText: 'AI generated alt text',
-          caption: 'AI generated caption',
-        },
-        { user: { id: 1 } }
+      expect(mockAiMetadataService.updateFilesWithAIMetadata).toHaveBeenCalledWith(
+        uploadedFiles,
+        [{ altText: 'AI generated alt text', caption: 'AI generated caption' }],
+        { id: 1 }
       );
     });
   });
@@ -468,6 +611,7 @@ describe('Admin Upload Controller - AI Service Connection', () => {
               name: 'fileA.jpg',
               caption: 'A',
               alternativeText: 'alternativeA',
+              focalPoint: null,
               folder: null,
             },
           },
@@ -477,6 +621,7 @@ describe('Admin Upload Controller - AI Service Connection', () => {
               name: 'fileB.jpg',
               alternativeText: 'alternativeB',
               caption: 'B',
+              focalPoint: null,
               folder: null,
             },
           },
@@ -493,21 +638,33 @@ describe('Admin Upload Controller - AI Service Connection', () => {
       expect(uploadService.updateFileInfo).toHaveBeenNthCalledWith(
         1,
         1,
-        { name: 'fileA.jpg', alternativeText: 'alternativeA', caption: 'A', folder: null },
+        {
+          name: 'fileA.jpg',
+          alternativeText: 'alternativeA',
+          caption: 'A',
+          focalPoint: null,
+          folder: null,
+        },
         { user: { id: 42 } }
       );
       expect(uploadService.updateFileInfo).toHaveBeenNthCalledWith(
         2,
         2,
-        { name: 'fileB.jpg', alternativeText: 'alternativeB', caption: 'B', folder: null },
+        {
+          name: 'fileB.jpg',
+          alternativeText: 'alternativeB',
+          caption: 'B',
+          focalPoint: null,
+          folder: null,
+        },
         { user: { id: 42 } }
       );
 
       expect(mockFindEntityAndCheckPermissions).toHaveBeenCalledTimes(2);
 
       expect(ctxBulk.body).toEqual([
-        { id: 1, caption: 'A', cleaned: true },
-        { id: 2, alternativeText: 'B', cleaned: true },
+        { id: 1, caption: 'A', cleaned: true, isUrlSigned: true },
+        { id: 2, alternativeText: 'B', cleaned: true, isUrlSigned: true },
       ]);
     });
 
@@ -541,6 +698,7 @@ describe('Admin Upload Controller - AI Service Connection', () => {
               name: 'fileA.jpg',
               caption: 'X',
               alternativeText: 'alternativeA',
+              focalPoint: null,
               folder: null,
             },
           },
@@ -552,10 +710,10 @@ describe('Admin Upload Controller - AI Service Connection', () => {
       await adminUploadController.bulkUpdateFileInfo(ctxBulk as Context);
 
       expect(sanitizeOutput).toHaveBeenCalledWith(
-        { id: 10, caption: 'X' },
+        { id: 10, caption: 'X', isUrlSigned: true },
         { action: ACTIONS.read }
       );
-      expect(ctxBulk.body).toEqual([{ ok: true, id: 10, caption: 'X' }]);
+      expect(ctxBulk.body).toEqual([expect.objectContaining({ ok: true, id: 10, caption: 'X' })]);
     });
 
     it('passes the authenticated user to updateFileInfo', async () => {
@@ -567,10 +725,12 @@ describe('Admin Upload Controller - AI Service Connection', () => {
               name: 'fileA.jpg',
               alternativeText: 'hello',
               caption: 'A',
+              focalPoint: null,
+              folder: null,
             },
           },
         ],
-      } as any);
+      });
 
       uploadService.updateFileInfo.mockResolvedValue({ id: 7 });
 
@@ -578,8 +738,70 @@ describe('Admin Upload Controller - AI Service Connection', () => {
 
       expect(uploadService.updateFileInfo).toHaveBeenCalledWith(
         7,
-        { name: 'fileA.jpg', alternativeText: 'hello', caption: 'A' },
+        {
+          name: 'fileA.jpg',
+          alternativeText: 'hello',
+          caption: 'A',
+          focalPoint: null,
+          folder: null,
+        },
         { user: { id: 42 } }
+      );
+    });
+  });
+
+  describe('updateFileInfo', () => {
+    it('updates a file, sanitizes outputs, and returns the signed file', async () => {
+      mockValidateUploadBody.mockResolvedValue({
+        id: 7,
+        fileInfo: {
+          name: 'fileA.jpg',
+          alternativeText: 'hello',
+          caption: 'A',
+        },
+      } as any);
+
+      uploadService.updateFileInfo.mockResolvedValue({ id: 7 });
+
+      await adminUploadController.updateFileInfo(mockContext as Context);
+
+      expect(fileService.signFileUrls).toHaveBeenCalledWith({ id: 7 });
+      expect(mockContext.body).toEqual(expect.objectContaining({ id: 7, isUrlSigned: true }));
+    });
+
+    // `PUT /upload/files/:id` delivers the id in route params; the legacy
+    // `POST /upload` multiplexer delegates here with it in the query string.
+    it('reads the id from route params', async () => {
+      mockContext.params = { id: '9' } as any;
+      mockContext.query = {} as any;
+
+      uploadService.updateFileInfo.mockResolvedValue({ id: 9 });
+
+      await adminUploadController.updateFileInfo(mockContext as Context);
+
+      expect(uploadService.updateFileInfo).toHaveBeenCalledWith('9', expect.anything(), {
+        user: { id: 1 },
+      });
+    });
+
+    it('prefers route params over the query id when both are present', async () => {
+      mockContext.params = { id: '9' } as any;
+      mockContext.query = { id: '7' } as any;
+
+      uploadService.updateFileInfo.mockResolvedValue({ id: 9 });
+
+      await adminUploadController.updateFileInfo(mockContext as Context);
+
+      expect(uploadService.updateFileInfo).toHaveBeenCalledWith('9', expect.anything(), {
+        user: { id: 1 },
+      });
+    });
+
+    it('throws when neither params nor query carry an id', async () => {
+      mockContext.query = {} as any;
+
+      await expect(adminUploadController.updateFileInfo(mockContext as Context)).rejects.toThrow(
+        'File id is required'
       );
     });
   });

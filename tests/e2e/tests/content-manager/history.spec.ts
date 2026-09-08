@@ -3,6 +3,7 @@ import {
   clickAndWait,
   describeOnCondition,
   findAndClose,
+  locateFirstAfter,
   navToHeader,
 } from '../../../utils/shared';
 import { resetFiles } from '../../../utils/file-reset';
@@ -39,8 +40,26 @@ const goToHistoryPage = async (page: Page) => {
   }
 };
 
-const goToContentTypeBuilder = async (page: Page) => {
-  await clickAndWait(page, page.getByRole('link', { name: 'Content-Type Builder' }));
+const ARTICLE_CTB_URL =
+  /\/admin\/plugins\/content-type-builder\/content-types\/api::article\.article/;
+const HOMEPAGE_CTB_URL =
+  /\/admin\/plugins\/content-type-builder\/content-types\/api::homepage\.homepage/;
+
+/**
+ * CTB restores the last visited type on open. Open the plugin, then click the type under the
+ * correct sidebar section so we do not hit the Content Manager link with the same name.
+ */
+const goToContentTypeInBuilder = async (
+  page: Page,
+  section: 'Collection Types' | 'Single Types',
+  contentTypeLinkName: string,
+  contentTypeUrl: RegExp
+) => {
+  await clickAndWait(page, page.locator('role=link[name^="Content-Type Builder"]').last());
+  await page.waitForURL(/\/plugins\/content-type-builder/);
+  const contentTypeLink = await locateFirstAfter(page, section, contentTypeLinkName);
+  await clickAndWait(page, contentTypeLink);
+  await page.waitForURL(contentTypeUrl);
 };
 
 describeOnCondition(edition === 'EE')('History', () => {
@@ -48,7 +67,7 @@ describeOnCondition(edition === 'EE')('History', () => {
     await sharedSetup('history-spec', page, {
       login: true,
       resetFiles: true,
-      importData: 'with-admin.tar',
+      importData: 'with-admin',
       resetAlways: true, // NOTE: this makes tests extremely slow, but it's necessary to ensure isolation between tests
     });
   });
@@ -256,7 +275,9 @@ describeOnCondition(edition === 'EE')('History', () => {
       await page.waitForURL(ARTICLE_CREATE_URL);
       await page.getByRole('textbox', { name: 'title' }).fill('Being from Kansas');
       await page
-        .getByRole('textbox', { name: 'slug This value is unique for the selected locale' })
+        .getByRole('textbox', {
+          name: 'slug',
+        })
         .fill('being-from-kansas');
       await page.getByRole('button', { name: 'Save' }).click();
       await page.waitForURL(ARTICLE_EDIT_URL);
@@ -264,10 +285,7 @@ describeOnCondition(edition === 'EE')('History', () => {
       /**
        * Rename field in content-type builder
        */
-      await goToContentTypeBuilder(page);
-      await page.waitForURL(
-        '/admin/plugins/content-type-builder/content-types/api::article.article'
-      );
+      await goToContentTypeInBuilder(page, 'Collection Types', 'Article', ARTICLE_CTB_URL);
       await page.getByRole('button', { name: 'Edit title' }).first().click();
       await page.getByRole('textbox', { name: 'name' }).fill('titleRename');
       await page.getByRole('button', { name: 'Finish' }).click();
@@ -417,12 +435,7 @@ describeOnCondition(edition === 'EE')('History', () => {
 
     test('A user should see the relations and whether some are missing', async ({ page }) => {
       // Create relation in Content-Type Builder
-      await goToContentTypeBuilder(page);
-
-      await clickAndWait(page, page.getByRole('link', { name: 'Homepage' }));
-      await page.waitForURL(
-        '/admin/plugins/content-type-builder/content-types/api::homepage.homepage'
-      );
+      await goToContentTypeInBuilder(page, 'Single Types', 'Homepage', HOMEPAGE_CTB_URL);
       await page.getByRole('button', { name: /add another field to this single type/i }).click();
       await page.getByRole('button', { name: /relation/i }).click();
       await page.getByLabel('Basic settings').getByRole('button').nth(1).click();
@@ -450,10 +463,12 @@ describeOnCondition(edition === 'EE')('History', () => {
       await page.getByRole('combobox', { name: 'Authors' }).click();
       await page.getByText('Coach Beard').click();
       await page.getByRole('button', { name: 'Save' }).click();
+      await findAndClose(page, 'Saved Document');
 
       // Delete one of the authors, leaving only Coach Beard
       // Open the relation modal
       await clickAndWait(page, page.getByRole('button', { name: 'Will Kitman' }));
+      await expect(page.getByRole('button', { name: 'Go to entry' })).toBeVisible();
       // Click to go to the related document
       await clickAndWait(page, page.getByRole('button', { name: 'Go to entry' }));
       await page.getByRole('button', { name: /more actions/i }).click();
@@ -488,12 +503,7 @@ describeOnCondition(edition === 'EE')('History', () => {
       /**
        * Rename field in content-type builder
        */
-      await goToContentTypeBuilder(page);
-
-      await clickAndWait(page, page.getByRole('link', { name: 'Homepage' }));
-      await page.waitForURL(
-        '/admin/plugins/content-type-builder/content-types/api::homepage.homepage'
-      );
+      await goToContentTypeInBuilder(page, 'Single Types', 'Homepage', HOMEPAGE_CTB_URL);
       await page.getByRole('button', { name: 'Edit title' }).first().click();
       await page.getByRole('textbox', { name: 'name' }).fill('titleRename');
       await page.getByRole('button', { name: 'Finish' }).click();

@@ -14,7 +14,6 @@ export interface TelemetryProperties {
   useTypescriptOnServer?: boolean;
   useTypescriptOnAdmin?: boolean;
   isHostedOnStrapiCloud?: boolean;
-  aiLicenseKey?: string;
   numberOfAllContentTypes?: number;
   numberOfComponents?: number;
   numberOfDynamicZones?: number;
@@ -131,9 +130,7 @@ export interface EventWithoutProperties {
     | 'didEditMediaLibraryConfig'
     | 'didEditNameOfContentType'
     | 'didGenerateGuidedTourApiTokens'
-    | 'didGoToMarketplace'
     | 'didLaunchGuidedtour'
-    | 'didMissMarketplacePlugin'
     | 'didNotCreateFirstAdmin'
     | 'didNotSaveComponent'
     | 'didPluginLearnMore'
@@ -198,7 +195,9 @@ export interface EventWithoutProperties {
     | 'didStartNewChat'
     | 'didLaunchGuidedtour'
     | 'didEditAICaption'
-    | 'didEditAIAlternativeText';
+    | 'didEditAIAlternativeText'
+    | 'didGenerateMetadataRetroactively';
+
   properties?: never;
 }
 
@@ -285,6 +284,14 @@ interface WillNavigateEvent {
   };
 }
 
+interface DidClickOnDocLink {
+  name: 'didClickOnDocLink';
+  properties: {
+    from: string;
+    to: string;
+  };
+}
+
 interface DidAccessTokenListEvent {
   name: 'didAccessTokenList';
   properties: {
@@ -319,7 +326,8 @@ interface WillModifyTokenEvent {
   name: 'didCreateToken' | 'didEditToken';
   properties: {
     tokenType: TokenEvents['properties']['tokenType'];
-    type: 'custom' | 'full-access' | 'read-only' | Array<'push' | 'pull' | 'push-pull'>;
+    kind?: 'admin' | 'content-api';
+    type?: 'custom' | 'full-access' | 'read-only' | Array<'push' | 'pull' | 'push-pull'>;
   };
 }
 
@@ -484,6 +492,7 @@ type EventsWithProperties =
   | UpdateEntryEvents
   | WillModifyTokenEvent
   | WillNavigateEvent
+  | DidClickOnDocLink
   | DidPublishRelease
   | MediaEvents
   | DidUpdateCTBSchema
@@ -535,6 +544,8 @@ export interface UseTrackingReturn {
  */
 const useTracking = (): UseTrackingReturn => {
   const deviceType = useDeviceType();
+  const deviceTypeRef = React.useRef(deviceType);
+  deviceTypeRef.current = deviceType;
   const { uuid, telemetryProperties } = React.useContext(TrackingContext);
   const userId = useAppInfo('useTracking', (state) => state.userId);
   const trackUsage = React.useCallback(
@@ -551,13 +562,12 @@ const useTracking = (): UseTrackingReturn => {
               userId,
               eventProperties: { ...properties },
               userProperties: {
-                deviceType,
+                deviceType: deviceTypeRef.current,
               },
               groupProperties: {
                 ...telemetryProperties,
                 projectId: uuid,
                 projectType: window.strapi.projectType,
-                aiLicenseKey: window.strapi.aiLicenseKey,
               },
             },
             {
@@ -570,7 +580,7 @@ const useTracking = (): UseTrackingReturn => {
 
           return res;
         }
-      } catch (err) {
+      } catch {
         // Silence is golden
       }
 

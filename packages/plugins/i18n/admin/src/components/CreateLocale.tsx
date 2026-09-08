@@ -54,6 +54,7 @@ const CreateLocale = ({ disabled, variant = 'default' }: CreateLocaleProps) => {
           startIcon={<Plus />}
           onClick={() => setVisible(true)}
           size="S"
+          fullWidth
         >
           {formatMessage({
             id: getTranslation('Settings.list.actions.add'),
@@ -136,7 +137,7 @@ const CreateModal = ({ onClose }: ModalCreateProps) => {
 
       refetchPermissions();
       onClose();
-    } catch (err) {
+    } catch {
       toggleNotification({
         type: 'danger',
         message: formatMessage({
@@ -281,7 +282,7 @@ const BaseForm = ({ mode = 'create' }: BaseFormProps) => {
     },
     {
       hint: {
-        id: getTranslation('Settings.locales.modal.create.name.label.description'),
+        id: getTranslation('Settings.locales.modal.create.name.description'),
         defaultMessage: 'Locale will be displayed under that name in the administration panel',
       },
       label: {
@@ -382,6 +383,7 @@ const EnumerationInput = ({
 }: Extract<InputProps, { type: 'enumeration' }>) => {
   const { value, error, onChange } = useField(name);
   const { data: defaultLocales = [] } = useGetDefaultLocalesQuery();
+  const fieldValue = typeof value === 'string' ? value : undefined;
 
   const handleChange = (value: string) => {
     if (Array.isArray(defaultLocales)) {
@@ -396,6 +398,9 @@ const EnumerationInput = ({
     }
   };
 
+  // Find the label for the current value to display in the combobox
+  const selectedOption = options.find((option) => option.value === fieldValue);
+
   return (
     <Field.Root error={error} hint={hint} name={name} required={required}>
       <Field.Label>{label}</Field.Label>
@@ -404,7 +409,8 @@ const EnumerationInput = ({
         onChange={handleChange}
         onClear={() => handleChange('')}
         placeholder={placeholder}
-        value={value}
+        value={fieldValue}
+        textValue={selectedOption?.label}
         autocomplete={{ type: 'list', filter: 'contains' }}
       >
         {options.map((option) => (

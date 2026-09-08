@@ -38,7 +38,6 @@ const getProperties = (scope: Scope, error?: TrackError) => {
     useTypescriptOnAdmin: boolToString(scope.useTypescript),
     useTypescript: boolToString(scope.useTypescript),
     isHostedOnStrapiCloud: process.env.STRAPI_HOSTING === 'strapi.cloud',
-    aiLicenseKey: process.env.STRAPI_ADMIN_AI_LICENSE,
     noRun: boolToString(scope.runApp),
     projectId: scope.uuid,
     useExample: boolToString(scope.useExample),
@@ -73,7 +72,7 @@ function trackEvent(event: string, payload: Record<string, unknown>) {
         'X-Strapi-Event': event,
       },
     }).catch(() => {});
-  } catch (err) {
+  } catch {
     /** ignore errors */
     return Promise.resolve();
   }
@@ -87,7 +86,7 @@ export async function trackError({ scope, error }: { scope: Scope; error?: Track
       deviceId: scope.installId,
       ...properties,
     });
-  } catch (err) {
+  } catch {
     /** ignore errors */
     return Promise.resolve();
   }
@@ -109,7 +108,7 @@ export async function trackUsage({
       deviceId: scope.installId,
       ...properties,
     });
-  } catch (err) {
+  } catch {
     /** ignore errors */
     return Promise.resolve();
   }

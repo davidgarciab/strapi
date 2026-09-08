@@ -24,10 +24,10 @@ interface BrowserStrapi {
   flags: {
     promoteEE?: boolean;
     nps?: boolean;
+    docLinks?: boolean;
   };
-  projectType: 'Community' | 'Enterprise';
+  projectType: 'Community' | 'Growth' | 'Enterprise';
   telemetryDisabled: boolean;
-  aiLicenseKey?: string;
   ai: {
     enabled: boolean;
   };

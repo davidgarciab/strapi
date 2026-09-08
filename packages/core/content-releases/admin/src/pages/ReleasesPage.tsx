@@ -233,7 +233,6 @@ const ReleasesPage = () => {
 
   const handleTabChange = (tabValue: string) => {
     setQuery({
-      ...query,
       page: 1,
       pageSize: response?.currentData?.meta?.pagination?.pageSize || 16,
       filters: {
@@ -303,6 +302,7 @@ const ReleasesPage = () => {
                 startIcon={<Plus />}
                 onClick={toggleAddReleaseModal}
                 disabled={hasReachedMaximumPendingReleases}
+                fullWidth
               >
                 {formatMessage({
                   id: 'content-releases.header.actions.add-release',

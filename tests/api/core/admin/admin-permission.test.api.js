@@ -344,6 +344,42 @@ describe('Role CRUD End to End', () => {
             ],
             "settings": [
               {
+                "action": "admin::admin-tokens.access",
+                "category": "admin tokens",
+                "displayName": "Access the Admin tokens settings page",
+                "subCategory": "admin tokens",
+              },
+              {
+                "action": "admin::admin-tokens.create",
+                "category": "admin tokens",
+                "displayName": "Create (generate)",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.delete",
+                "category": "admin tokens",
+                "displayName": "Delete (revoke)",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.read",
+                "category": "admin tokens",
+                "displayName": "Read",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.regenerate",
+                "category": "admin tokens",
+                "displayName": "Regenerate",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.update",
+                "category": "admin tokens",
+                "displayName": "Update",
+                "subCategory": "general",
+              },
+              {
                 "action": "admin::api-tokens.access",
                 "category": "api tokens",
                 "displayName": "Access the API tokens settings page",
@@ -378,6 +414,12 @@ describe('Role CRUD End to End', () => {
                 "category": "api tokens",
                 "displayName": "Update",
                 "subCategory": "general",
+              },
+              {
+                "action": "admin::audit-logs.export",
+                "category": "audit logs",
+                "displayName": "Export",
+                "subCategory": "options",
               },
               {
                 "action": "admin::audit-logs.read",
@@ -929,6 +971,42 @@ describe('Role CRUD End to End', () => {
               },
             ],
             "settings": [
+              {
+                "action": "admin::admin-tokens.access",
+                "category": "admin tokens",
+                "displayName": "Access the Admin tokens settings page",
+                "subCategory": "admin tokens",
+              },
+              {
+                "action": "admin::admin-tokens.create",
+                "category": "admin tokens",
+                "displayName": "Create (generate)",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.delete",
+                "category": "admin tokens",
+                "displayName": "Delete (revoke)",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.read",
+                "category": "admin tokens",
+                "displayName": "Read",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.regenerate",
+                "category": "admin tokens",
+                "displayName": "Regenerate",
+                "subCategory": "general",
+              },
+              {
+                "action": "admin::admin-tokens.update",
+                "category": "admin tokens",
+                "displayName": "Update",
+                "subCategory": "general",
+              },
               {
                 "action": "admin::api-tokens.access",
                 "category": "api tokens",

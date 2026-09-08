@@ -1,3 +1,6 @@
+import * as z from 'zod/v4';
+import { z as exportedZ } from '@strapi/utils';
+
 import createContentAPI from '../content-api';
 
 const strapiMock = {
@@ -302,6 +305,211 @@ describe('Content API - Permissions', () => {
       expect(global.strapi.log.debug).toHaveBeenCalledTimes(1);
       expect(global.strapi.log.debug).toHaveBeenCalledWith(
         `Unknown action "foo" supplied when registering a new permission`
+      );
+    });
+  });
+
+  describe('addQueryParams / addInputParams / applyExtraParamsToRoutes', () => {
+    const minimalStrapi = { ...strapiMock, apis: {}, plugins: {} } as any;
+
+    /** Minimal content-api route; pass request (and optionally method/path) to override. */
+    const contentAPIRoute = (overrides: Record<string, unknown> = {}) => ({
+      method: 'GET',
+      path: '/api/foo',
+      handler: '',
+      info: { type: 'content-api' as const },
+      request: {},
+      ...overrides,
+    });
+
+    let contentAPI: ReturnType<typeof createContentAPI>;
+
+    beforeEach(() => {
+      global.strapi = minimalStrapi;
+      contentAPI = createContentAPI(global.strapi);
+    });
+
+    it('applyExtraParamsToRoutes throws when a route already has the query param', () => {
+      contentAPI.addQueryParams({ search: { schema: z.string() } });
+      const route = contentAPIRoute({
+        request: { query: { search: z.string() } },
+      });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).toThrow(
+        /param "search" already exists on route/
+      );
+    });
+
+    it('applyExtraParamsToRoutes throws when a route already has the input param', () => {
+      contentAPI.addInputParams({ clientMutationId: { schema: z.string() } });
+      const route = contentAPIRoute({
+        method: 'POST',
+        request: { body: { 'application/json': z.object({ clientMutationId: z.string() }) } },
+      });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).toThrow(
+        /param "clientMutationId" already exists on route/
+      );
+    });
+
+    it('addQueryParams throws when the same param name is added twice', () => {
+      contentAPI.addQueryParams({ search: { schema: z.string() } });
+      expect(() => contentAPI.addQueryParams({ search: { schema: z.number() } })).toThrow(
+        /contentAPI\.addQueryParams: param "search" has already been added/
+      );
+    });
+
+    it('addInputParams throws when the same param name is added twice', () => {
+      contentAPI.addInputParams({ clientMutationId: { schema: z.string() } });
+      expect(() => contentAPI.addInputParams({ clientMutationId: { schema: z.number() } })).toThrow(
+        /contentAPI\.addInputParams: param "clientMutationId" has already been added/
+      );
+    });
+
+    it.each(['filters', 'sort'])('addQueryParams throws when param "%s" is reserved', (param) => {
+      expect(() => contentAPI.addQueryParams({ [param]: { schema: z.string() } })).toThrow(
+        new RegExp(`param "${param}" is reserved by Strapi; use a different name`)
+      );
+    });
+
+    it.each(['id', 'documentId'])('addInputParams throws when param "%s" is reserved', (param) => {
+      expect(() => contentAPI.addInputParams({ [param]: { schema: z.string() } })).toThrow(
+        new RegExp(`param "${param}" is reserved by Strapi; use a different name`)
+      );
+    });
+
+    const querySchemaError = (param: string, got: string) =>
+      `contentAPI.addQueryParams: param "${param}" schema must be a scalar (string, number, boolean, enum) or array of scalars; got ${got}. Use addInputParams for nested objects.`;
+
+    it('addQueryParams throws when schema is a nested object (only scalars/arrays of scalars allowed)', () => {
+      expect(() =>
+        contentAPI.addQueryParams({
+          filter: { schema: z.object({ name: z.string() }) },
+        })
+      ).toThrow(querySchemaError('filter', 'ZodObject'));
+    });
+
+    it.each([
+      { label: 'plain object', schema: {}, got: 'Object' },
+      { label: 'null', schema: null, got: 'object' },
+      { label: 'number', schema: 42, got: 'number' },
+    ])('addQueryParams throws when schema is not a Zod type ($label)', ({ schema, got }) => {
+      expect(() =>
+        contentAPI.addQueryParams({
+          filter: { schema },
+        } as Parameters<typeof contentAPI.addQueryParams>[0])
+      ).toThrow(querySchemaError('filter', got));
+    });
+
+    it('addQueryParams throws when schema is an optional nested object', () => {
+      expect(() =>
+        contentAPI.addQueryParams({
+          filter: { schema: z.object({ name: z.string() }).optional() },
+        })
+      ).toThrow(querySchemaError('filter', 'ZodObject'));
+    });
+
+    it('addQueryParams throws when schema is an array of objects', () => {
+      expect(() =>
+        contentAPI.addQueryParams({
+          filter: { schema: z.array(z.object({ name: z.string() })) },
+        })
+      ).toThrow(querySchemaError('filter', 'ZodObject'));
+    });
+
+    it('addQueryParams throws when schema type name needs underscore formatting', () => {
+      expect(() =>
+        contentAPI.addQueryParams({
+          filter: { schema: z.templateLiteral(['id-', z.string()]) },
+        })
+      ).toThrow(querySchemaError('filter', 'ZodTemplateLiteral'));
+    });
+
+    it.each([
+      { label: 'string', schema: z.string(), value: 'foo' },
+      { label: 'number', schema: z.number(), value: 1 },
+      { label: 'boolean', schema: z.boolean(), value: true },
+      { label: 'enum', schema: z.enum(['draft', 'published']), value: 'draft' },
+      { label: 'optional string', schema: z.string().optional(), value: undefined },
+      { label: 'default string', schema: z.string().default('x'), value: undefined },
+    ])('addQueryParams accepts $label and merges into route', ({ schema, value }) => {
+      contentAPI.addQueryParams({ extra: { schema } });
+      const route = contentAPIRoute({ request: { query: {} } });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).not.toThrow();
+      const extraSchema = route.request?.query?.extra as z.ZodType;
+      expect(extraSchema.safeParse(value).success).toBe(true);
+    });
+
+    it('addQueryParams accepts array of scalars and merges into route', () => {
+      contentAPI.addQueryParams({ tags: { schema: z.array(z.string()) } });
+      const route = contentAPIRoute({ request: { query: {} } });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).not.toThrow();
+      expect(route.request?.query).toHaveProperty('tags');
+      const tagsSchema = route.request?.query?.tags as z.ZodType;
+      expect(tagsSchema).toBeDefined();
+      expect(tagsSchema.safeParse(['a', 'b']).success).toBe(true);
+    });
+
+    it('addQueryParams accepts schema as function that receives z and returns schema', () => {
+      contentAPI.addQueryParams({
+        search: { schema: (zInstance) => zInstance.string().max(200).optional() },
+      });
+      const route = contentAPIRoute({ path: '/api/articles', request: { query: {} } });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).not.toThrow();
+      expect(route.request?.query).toHaveProperty('search');
+      const searchSchema = route.request?.query?.search as z.ZodType;
+      expect(searchSchema.safeParse('foo').success).toBe(true);
+    });
+
+    it('addInputParams accepts schema as function that receives z and returns schema', () => {
+      contentAPI.addInputParams({
+        clientMutationId: { schema: (zInstance) => zInstance.string().max(100).optional() },
+      });
+      const route = contentAPIRoute({
+        method: 'POST',
+        path: '/api/articles',
+        request: { body: {} },
+      });
+      expect(() => contentAPI.applyExtraParamsToRoutes([route])).not.toThrow();
+      const bodySchema = route.request?.body?.['application/json'] as {
+        shape: Record<string, z.ZodType>;
+      };
+      expect(bodySchema?.shape?.clientMutationId).toBeDefined();
+    });
+
+    it('composes and parses an exported z schema with an existing route body schema', () => {
+      contentAPI.addInputParams({
+        metadata: {
+          schema: exportedZ.object({
+            label: exportedZ.string().trim().min(1),
+            enabled: exportedZ.boolean().default(true),
+          }),
+        },
+      });
+      const route = contentAPIRoute({
+        method: 'POST',
+        request: {
+          body: {
+            'application/json': z.object({
+              title: z.string().min(1),
+            }),
+          },
+        },
+      });
+
+      contentAPI.applyExtraParamsToRoutes([route]);
+
+      const bodySchema = route.request?.body?.['application/json'] as z.ZodType;
+      expect(
+        bodySchema.parse({
+          title: 'Document',
+          metadata: { label: '  imported schema  ' },
+        })
+      ).toEqual({
+        title: 'Document',
+        metadata: { label: 'imported schema', enabled: true },
+      });
+      expect(bodySchema.safeParse({ title: '', metadata: { label: 'valid' } }).success).toBe(false);
+      expect(bodySchema.safeParse({ title: 'Document', metadata: { label: '' } }).success).toBe(
+        false
       );
     });
   });

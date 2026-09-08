@@ -66,7 +66,7 @@ export const EditPage = () => {
       toggleNotification({
         type: 'success',
         message: formatMessage({
-          id: getTrad('Settings.roles.created'),
+          id: getTrad('Settings.roles.edited'),
           defaultMessage: 'Role edited',
         }),
       });
@@ -109,6 +109,7 @@ export const EditPage = () => {
                     type="submit"
                     loading={mutation.isLoading}
                     startIcon={<Check />}
+                    fullWidth
                   >
                     {formatMessage({
                       id: 'global.save',

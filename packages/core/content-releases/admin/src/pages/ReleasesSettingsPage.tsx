@@ -104,7 +104,7 @@ const ReleasesSettingsPage = () => {
           }),
         });
       }
-    } catch (error) {
+    } catch {
       toggleNotification({
         type: 'danger',
         message: formatMessage({
@@ -154,6 +154,7 @@ const ReleasesSettingsPage = () => {
                         loading={isSubmitting}
                         startIcon={<Check />}
                         type="submit"
+                        fullWidth
                       >
                         {formatMessage({
                           id: 'global.save',
@@ -217,7 +218,7 @@ const TimezoneDropdown = () => {
   } = useRBAC(permissions);
   const { formatMessage } = useIntl();
   const { timezoneList } = getTimezones(new Date());
-  const field = useField('defaultTimezone');
+  const field = useField<UpdateDefaultTimezone['defaultTimezone']>('defaultTimezone');
   return (
     <Field.Root
       name="defaultTimezone"

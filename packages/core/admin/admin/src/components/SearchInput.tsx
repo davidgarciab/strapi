@@ -1,11 +1,12 @@
 import * as React from 'react';
 
-import { IconButton, Searchbar, SearchForm } from '@strapi/design-system';
+import { Box, IconButton, Searchbar, SearchForm } from '@strapi/design-system';
 import { Search as SearchIcon } from '@strapi/icons';
 import { useIntl } from 'react-intl';
 
 import { TrackingEvent, useTracking } from '../features/Tracking';
-import { useQueryParams } from '../hooks/useQueryParams';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { useQueryParams, withEncodedUserParams } from '../hooks/useQueryParams';
 
 interface SearchInputProps {
   disabled?: boolean;
@@ -25,13 +26,18 @@ const SearchInput = ({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const iconButtonRef = React.useRef<HTMLButtonElement>(null);
 
-  const [{ query }, setQuery] = useQueryParams<{ _q: string; page?: number }>();
+  const [{ query }, setQuery] = useQueryParams<{
+    _q?: string;
+    page?: number;
+    filters?: unknown;
+  }>();
 
   const [value, setValue] = React.useState(query?._q || '');
   const [isOpen, setIsOpen] = React.useState(!!value);
 
   const { formatMessage } = useIntl();
   const { trackUsage } = useTracking();
+  const isMobile = useIsMobile();
 
   const handleToggle = () => setIsOpen((prev) => !prev);
 
@@ -41,9 +47,11 @@ const SearchInput = ({
     }
   }, [isOpen]);
 
+  const clearSearch = () => setQuery(withEncodedUserParams(query, { _q: undefined }));
+
   const handleClear = () => {
     setValue('');
-    setQuery({ _q: '' }, 'remove');
+    clearSearch();
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -54,34 +62,46 @@ const SearchInput = ({
       if (trackedEvent) {
         trackUsage(trackedEvent, trackedEventDetails);
       }
-      setQuery({ _q: encodeURIComponent(value), page: 1 });
+      setQuery(withEncodedUserParams(query, { _q: encodeURIComponent(value), page: 1 }));
     } else {
       handleToggle();
-      setQuery({ _q: '' }, 'remove');
+      clearSearch();
     }
   };
 
+  const renderSearchForm = (opts?: { enableBlurClose?: boolean }) => (
+    <SearchForm onSubmit={handleSubmit}>
+      <Searchbar
+        ref={inputRef}
+        name="search"
+        onChange={(e) => setValue(e.target.value)}
+        value={value}
+        clearLabel={formatMessage({ id: 'clearLabel', defaultMessage: 'Clear' })}
+        onClear={handleClear}
+        placeholder={isMobile ? undefined : placeholder}
+        disabled={disabled}
+        onBlur={
+          opts?.enableBlurClose
+            ? (e) => {
+                if (!e.currentTarget.contains(e.relatedTarget) && e.currentTarget.value === '') {
+                  setIsOpen(false);
+                }
+              }
+            : undefined
+        }
+      >
+        {label}
+      </Searchbar>
+    </SearchForm>
+  );
+
+  if (isMobile) {
+    // Add wrapper so that the Searchbar takes up the rest of the available space.
+    return <Box width="100%">{renderSearchForm()}</Box>;
+  }
+
   if (isOpen) {
-    return (
-      <SearchForm onSubmit={handleSubmit}>
-        <Searchbar
-          ref={inputRef}
-          name="search"
-          onChange={(e) => setValue(e.target.value)}
-          value={value}
-          clearLabel={formatMessage({ id: 'clearLabel', defaultMessage: 'Clear' })}
-          onClear={handleClear}
-          placeholder={placeholder}
-          onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget) && e.currentTarget.value === '') {
-              setIsOpen(false);
-            }
-          }}
-        >
-          {label}
-        </Searchbar>
-      </SearchForm>
-    );
+    return renderSearchForm({ enableBlurClose: true });
   }
 
   return (

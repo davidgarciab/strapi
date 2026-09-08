@@ -1,16 +1,16 @@
 import { NotificationConfig } from '@strapi/admin/strapi-admin';
 import { MessageDescriptor } from 'react-intl';
 
-import { previewScript } from './previewScript';
-
-const scriptResponse = previewScript(false);
-
 /**
- * These events can be changed safely. They're used by the content manager admin on one side, and by
- * the preview script on the other. We own both ends, and they're not documented to users, so we can
- * do what we want with them.
+ * These events are not part of the public API, changing them is not a breaking change.
  */
-export const INTERNAL_EVENTS = scriptResponse!.INTERNAL_EVENTS;
+export const INTERNAL_EVENTS = {
+  STRAPI_FIELD_FOCUS: 'strapiFieldFocus',
+  STRAPI_FIELD_BLUR: 'strapiFieldBlur',
+  STRAPI_FIELD_CHANGE: 'strapiFieldChange',
+  STRAPI_FIELD_FOCUS_INTENT: 'strapiFieldFocusIntent',
+  STRAPI_FIELD_SINGLE_CLICK_HINT: 'strapiFieldSingleClickHint',
+} as const;
 
 /**
  * These events are documented to users, and will be hardcoded in their frontends.
